@@ -1,5 +1,6 @@
 from django.db import models
 from core.models import BaseModel
+from core.querysets import ClinicScopedManager
 
 TEST_ORDER_STATUS_CHOICES = [
     ('pending', 'Pending'),
@@ -9,6 +10,8 @@ TEST_ORDER_STATUS_CHOICES = [
 
 
 class LabTest(BaseModel):
+    objects = ClinicScopedManager()
+
     clinic_id = models.UUIDField()
     name = models.TextField()
     description = models.TextField(blank=True, null=True)

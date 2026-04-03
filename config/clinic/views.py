@@ -8,6 +8,7 @@ from rest_framework import status
 from .models import Patient, Visit, Consultation
 from .serializers import PatientSerializer, VisitSerializer, ConsultationSerializer
 from users.permissions import HasPermission
+from core.querysets import PaginatedListMixin
 
 
 def _parse_uuid(value, field_name):
@@ -21,7 +22,7 @@ def _parse_uuid(value, field_name):
         )
 
 
-class PatientListView(APIView):
+class PatientListView(PaginatedListMixin, APIView):
     """
     GET  /api/clinic/patients/        — all authenticated staff, scoped to clinic
     POST /api/clinic/patients/        — receptionist, admin
@@ -33,8 +34,8 @@ class PatientListView(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        qs = Patient.objects.filter(clinic_id=request.user.clinic_id)
-        return Response(PatientSerializer(qs, many=True).data)
+        qs = Patient.objects.for_clinic(request.user.clinic_id)
+        return self.paginate(qs, PatientSerializer, request)
 
     def post(self, request):
         serializer = PatientSerializer(data=request.data)
@@ -55,7 +56,7 @@ class PatientDetailView(APIView):
         return super().get_permissions()
 
     def _get_object(self, request, patient_id):
-        return get_object_or_404(Patient, id=patient_id, clinic_id=request.user.clinic_id)
+        return get_object_or_404(Patient.objects.for_clinic(request.user.clinic_id), id=patient_id)
 
     def get(self, request, patient_id):
         return Response(PatientSerializer(self._get_object(request, patient_id)).data)
@@ -68,7 +69,7 @@ class PatientDetailView(APIView):
         return Response(serializer.data)
 
 
-class VisitListView(APIView):
+class VisitListView(PaginatedListMixin, APIView):
     """
     GET  /api/clinic/visits/   — all authenticated staff
     POST /api/clinic/visits/   — receptionist, admin
@@ -80,11 +81,11 @@ class VisitListView(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        qs = Visit.objects.filter(clinic_id=request.user.clinic_id)
+        qs = Visit.objects.for_clinic(request.user.clinic_id)
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
-        return Response(VisitSerializer(qs, many=True).data)
+        return self.paginate(qs, VisitSerializer, request)
 
     def post(self, request):
         # Ensure the patient belongs to the same clinic
@@ -93,7 +94,7 @@ class VisitListView(APIView):
             parsed, err = _parse_uuid(patient_id, 'patient_id')
             if err:
                 return err
-            get_object_or_404(Patient, id=parsed, clinic_id=request.user.clinic_id)
+            get_object_or_404(Patient.objects.for_clinic(request.user.clinic_id), id=parsed)
 
         serializer = VisitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -113,7 +114,7 @@ class VisitDetailView(APIView):
         return super().get_permissions()
 
     def _get_object(self, request, visit_id):
-        return get_object_or_404(Visit, id=visit_id, clinic_id=request.user.clinic_id)
+        return get_object_or_404(Visit.objects.for_clinic(request.user.clinic_id), id=visit_id)
 
     def get(self, request, visit_id):
         return Response(VisitSerializer(self._get_object(request, visit_id)).data)
@@ -126,7 +127,7 @@ class VisitDetailView(APIView):
         return Response(serializer.data)
 
 
-class ConsultationListView(APIView):
+class ConsultationListView(PaginatedListMixin, APIView):
     """
     GET  /api/clinic/consultations/   — all authenticated staff
     POST /api/clinic/consultations/   — doctor
@@ -138,14 +139,13 @@ class ConsultationListView(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        visit_ids = Visit.objects.filter(
-            clinic_id=request.user.clinic_id
-        ).values_list('id', flat=True)
+        # Consultation has no clinic_id — resolved through visits
+        visit_ids = Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
         qs = Consultation.objects.filter(visit_id__in=visit_ids)
         visit_id = request.query_params.get('visit_id')
         if visit_id:
             qs = qs.filter(visit_id=visit_id)
-        return Response(ConsultationSerializer(qs, many=True).data)
+        return self.paginate(qs, ConsultationSerializer, request)
 
     def post(self, request):
         visit_id = request.data.get('visit_id')
@@ -153,7 +153,7 @@ class ConsultationListView(APIView):
             parsed, err = _parse_uuid(visit_id, 'visit_id')
             if err:
                 return err
-            get_object_or_404(Visit, id=parsed, clinic_id=request.user.clinic_id)
+            get_object_or_404(Visit.objects.for_clinic(request.user.clinic_id), id=parsed)
 
         serializer = ConsultationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -167,8 +167,6 @@ class ConsultationDetailView(APIView):
     """
 
     def get(self, request, consultation_id):
-        visit_ids = Visit.objects.filter(
-            clinic_id=request.user.clinic_id
-        ).values_list('id', flat=True)
+        visit_ids = Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
         consultation = get_object_or_404(Consultation, id=consultation_id, visit_id__in=visit_ids)
         return Response(ConsultationSerializer(consultation).data)

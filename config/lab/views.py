@@ -14,6 +14,7 @@ from .serializers import (
 )
 from clinic.models import Visit
 from users.permissions import HasPermission
+from core.querysets import PaginatedListMixin
 
 
 def _parse_uuid(value, field_name):
@@ -27,7 +28,7 @@ def _parse_uuid(value, field_name):
         )
 
 
-class LabTestListView(APIView):
+class LabTestListView(PaginatedListMixin, APIView):
     """
     GET  /api/lab/tests/   — all authenticated staff (active tests only for non-admins)
     POST /api/lab/tests/   — admin
@@ -39,10 +40,10 @@ class LabTestListView(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        qs = LabTest.objects.filter(clinic_id=request.user.clinic_id)
+        qs = LabTest.objects.for_clinic(request.user.clinic_id)
         if request.user.role != 'admin':
             qs = qs.filter(is_active=True)
-        return Response(LabTestSerializer(qs, many=True).data)
+        return self.paginate(qs, LabTestSerializer, request)
 
     def post(self, request):
         serializer = LabTestSerializer(data=request.data)
@@ -63,7 +64,7 @@ class LabTestDetailView(APIView):
         return super().get_permissions()
 
     def _get_object(self, request, test_id):
-        return get_object_or_404(LabTest, id=test_id, clinic_id=request.user.clinic_id)
+        return get_object_or_404(LabTest.objects.for_clinic(request.user.clinic_id), id=test_id)
 
     def get(self, request, test_id):
         return Response(LabTestSerializer(self._get_object(request, test_id)).data)
@@ -76,7 +77,7 @@ class LabTestDetailView(APIView):
         return Response(serializer.data)
 
 
-class TestOrderListView(APIView):
+class TestOrderListView(PaginatedListMixin, APIView):
     """
     GET  /api/lab/orders/   — all authenticated staff
     POST /api/lab/orders/   — doctor
@@ -88,9 +89,8 @@ class TestOrderListView(APIView):
         return super().get_permissions()
 
     def _clinic_visit_ids(self, request):
-        return Visit.objects.filter(
-            clinic_id=request.user.clinic_id
-        ).values_list('id', flat=True)
+        # TestOrder has no clinic_id — resolved through visits
+        return Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
 
     def get(self, request):
         qs = TestOrder.objects.filter(visit_id__in=self._clinic_visit_ids(request))
@@ -100,7 +100,7 @@ class TestOrderListView(APIView):
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
-        return Response(TestOrderSerializer(qs, many=True).data)
+        return self.paginate(qs, TestOrderSerializer, request)
 
     def post(self, request):
         visit_id = request.data.get('visit_id')
@@ -108,14 +108,14 @@ class TestOrderListView(APIView):
             parsed, err = _parse_uuid(visit_id, 'visit_id')
             if err:
                 return err
-            get_object_or_404(Visit, id=parsed, clinic_id=request.user.clinic_id)
+            get_object_or_404(Visit.objects.for_clinic(request.user.clinic_id), id=parsed)
 
         test_id = request.data.get('test_id')
         if test_id:
             parsed, err = _parse_uuid(test_id, 'test_id')
             if err:
                 return err
-            get_object_or_404(LabTest, id=parsed, clinic_id=request.user.clinic_id, is_active=True)
+            get_object_or_404(LabTest.objects.for_clinic(request.user.clinic_id), id=parsed, is_active=True)
 
         serializer = TestOrderSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -135,9 +135,7 @@ class TestOrderDetailView(APIView):
         return super().get_permissions()
 
     def _get_object(self, request, order_id):
-        visit_ids = Visit.objects.filter(
-            clinic_id=request.user.clinic_id
-        ).values_list('id', flat=True)
+        visit_ids = Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
         return get_object_or_404(TestOrder, id=order_id, visit_id__in=visit_ids)
 
     def get(self, request, order_id):
@@ -153,7 +151,7 @@ class TestOrderDetailView(APIView):
         return Response(TestOrderSerializer(order).data)
 
 
-class TestResultListView(APIView):
+class TestResultListView(PaginatedListMixin, APIView):
     """
     GET  /api/lab/results/   — all authenticated staff
     POST /api/lab/results/   — lab_tech
@@ -165,9 +163,7 @@ class TestResultListView(APIView):
         return super().get_permissions()
 
     def _clinic_order_ids(self, request):
-        visit_ids = Visit.objects.filter(
-            clinic_id=request.user.clinic_id
-        ).values_list('id', flat=True)
+        visit_ids = Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
         return TestOrder.objects.filter(visit_id__in=visit_ids).values_list('id', flat=True)
 
     def get(self, request):
@@ -175,7 +171,7 @@ class TestResultListView(APIView):
         order_id = request.query_params.get('order_id')
         if order_id:
             qs = qs.filter(test_order_id=order_id)
-        return Response(TestResultSerializer(qs, many=True).data)
+        return self.paginate(qs, TestResultSerializer, request)
 
     def post(self, request):
         order_id = request.data.get('test_order_id')
@@ -183,9 +179,7 @@ class TestResultListView(APIView):
             parsed, err = _parse_uuid(order_id, 'test_order_id')
             if err:
                 return err
-            visit_ids = Visit.objects.filter(
-                clinic_id=request.user.clinic_id
-            ).values_list('id', flat=True)
+            visit_ids = Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
             get_object_or_404(TestOrder, id=parsed, visit_id__in=visit_ids)
 
         serializer = TestResultSerializer(data=request.data)
@@ -200,9 +194,7 @@ class TestResultDetailView(APIView):
     """
 
     def get(self, request, result_id):
-        visit_ids = Visit.objects.filter(
-            clinic_id=request.user.clinic_id
-        ).values_list('id', flat=True)
+        visit_ids = Visit.objects.for_clinic(request.user.clinic_id).values_list('id', flat=True)
         order_ids = TestOrder.objects.filter(visit_id__in=visit_ids).values_list('id', flat=True)
         result = get_object_or_404(TestResult, id=result_id, test_order_id__in=order_ids)
         return Response(TestResultSerializer(result).data)

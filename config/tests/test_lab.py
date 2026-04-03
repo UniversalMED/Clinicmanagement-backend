@@ -59,7 +59,7 @@ class LabTestCatalogueTests(TestCase):
 
         resp = auth_client(self.doctor).get('/api/lab/tests/')
         self.assertEqual(resp.status_code, 200)
-        ids = [t['id'] for t in resp.data]
+        ids = [t['id'] for t in resp.data['results']]
         self.assertIn(str(active.id), ids)
         self.assertNotIn(str(inactive.id), ids)
 
@@ -69,7 +69,7 @@ class LabTestCatalogueTests(TestCase):
         lab_test.save()
 
         resp = auth_client(self.admin).get('/api/lab/tests/')
-        ids = [t['id'] for t in resp.data]
+        ids = [t['id'] for t in resp.data['results']]
         self.assertIn(str(lab_test.id), ids)
 
     def test_lab_test_clinic_isolation(self):
@@ -78,7 +78,7 @@ class LabTestCatalogueTests(TestCase):
         other_test = make_lab_test(other_clinic_id, other_admin)
 
         resp = auth_client(self.admin).get('/api/lab/tests/')
-        ids = [t['id'] for t in resp.data]
+        ids = [t['id'] for t in resp.data['results']]
         self.assertNotIn(str(other_test.id), ids)
 
 
@@ -176,7 +176,7 @@ class TestOrderTests(TestCase):
         make_test_order(self.visit, self.lab_test, self.doctor)
         resp = auth_client(self.doctor).get('/api/lab/orders/?status=pending')
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(all(o['status'] == 'pending' for o in resp.data))
+        self.assertTrue(all(o['status'] == 'pending' for o in resp.data['results']))
 
 
 class TestResultTests(TestCase):
@@ -237,4 +237,4 @@ class TestResultTests(TestCase):
         other_lab_tech = make_user(uuid.uuid4(), 'lab_tech')
         resp = auth_client(other_lab_tech).get('/api/lab/results/')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.data), 0)
+        self.assertEqual(len(resp.data['results']), 0)

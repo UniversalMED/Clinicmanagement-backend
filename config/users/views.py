@@ -1,4 +1,3 @@
-import uuid
 import requests as http_requests
 from django.shortcuts import get_object_or_404
 from django.conf import settings
@@ -9,6 +8,7 @@ from rest_framework import status
 from .models import Profile
 from .serializers import ProfileSerializer, AssignRoleSerializer, UpdateProfileSerializer, CreateUserSerializer
 from .permissions import HasPermission, IsAdminOrSelf
+from core.querysets import PaginatedListMixin
 
 
 class CurrentUserView(APIView):
@@ -17,11 +17,11 @@ class CurrentUserView(APIView):
     def get(self, request):
         # request.user is a JWTUser (no DB hit during auth).
         # This is the one endpoint that explicitly fetches the Profile row.
-        profile = get_object_or_404(Profile, id=request.user.id)
+        profile = get_object_or_404(Profile.objects.get_queryset(), id=request.user.id)
         return Response(ProfileSerializer(profile).data)
 
 
-class UserListView(APIView):
+class UserListView(PaginatedListMixin, APIView):
     """
     GET  /api/users/?role=<role>  — admin only, scoped to clinic
     POST /api/users/              — admin only, creates auth user + profile
@@ -29,11 +29,11 @@ class UserListView(APIView):
     permission_classes = [HasPermission.for_permission('manage_users')]
 
     def get(self, request):
-        qs = Profile.objects.filter(clinic_id=request.user.clinic_id)
+        qs = Profile.objects.for_clinic(request.user.clinic_id)
         role = request.query_params.get('role')
         if role:
             qs = qs.filter(role=role)
-        return Response(ProfileSerializer(qs, many=True).data)
+        return self.paginate(qs, ProfileSerializer, request)
 
     def post(self, request):
         serializer = CreateUserSerializer(data=request.data)
@@ -72,7 +72,7 @@ class UserListView(APIView):
 
         # Step 2 — create the profile row; if this fails, delete the auth user to avoid orphans
         try:
-            profile = Profile.objects.create(
+            profile = Profile.objects.get_queryset().create(
                 id=auth_user_id,
                 clinic_id=request.user.clinic_id,
                 full_name=data['full_name'],
@@ -102,7 +102,7 @@ class AssignRoleView(APIView):
 
     def patch(self, request, user_id):
         profile = get_object_or_404(
-            Profile, id=user_id, clinic_id=request.user.clinic_id
+            Profile.objects.for_clinic(request.user.clinic_id), id=user_id
         )
         serializer = AssignRoleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -120,7 +120,7 @@ class UpdateUserView(APIView):
 
     def patch(self, request, user_id):
         profile = get_object_or_404(
-            Profile, id=user_id, clinic_id=request.user.clinic_id
+            Profile.objects.for_clinic(request.user.clinic_id), id=user_id
         )
         self.check_object_permissions(request, profile)
         serializer = UpdateProfileSerializer(profile, data=request.data, partial=True)

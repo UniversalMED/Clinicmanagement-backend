@@ -1,5 +1,7 @@
 from django.db import models
 
+from core.querysets import ClinicScopedManager
+
 ROLE_CHOICES = [
     ('receptionist', 'Receptionist'),
     ('doctor', 'Doctor'),
@@ -9,6 +11,8 @@ ROLE_CHOICES = [
 
 
 class Profile(models.Model):
+    objects = ClinicScopedManager()
+
     id = models.UUIDField(primary_key=True)  # mirrors auth.users(id) in Supabase
     clinic_id = models.UUIDField()
     full_name = models.TextField(blank=True, null=True)

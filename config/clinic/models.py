@@ -1,5 +1,6 @@
 from django.db import models
 from core.models import BaseModel
+from core.querysets import ClinicScopedManager
 
 GENDER_CHOICES = [
     ('male', 'Male'),
@@ -14,6 +15,8 @@ VISIT_STATUS_CHOICES = [
 
 
 class Patient(BaseModel):
+    objects = ClinicScopedManager()
+
     clinic_id = models.UUIDField()
     full_name = models.TextField()
     gender = models.TextField(choices=GENDER_CHOICES, null=True, blank=True)
@@ -26,6 +29,8 @@ class Patient(BaseModel):
 
 
 class Visit(BaseModel):
+    objects = ClinicScopedManager()
+
     clinic_id = models.UUIDField()
     patient_id = models.UUIDField()
     created_by = models.UUIDField()

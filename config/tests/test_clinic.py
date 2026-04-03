@@ -1,4 +1,4 @@
-
+\
 """
 Clinic integration tests.
 
@@ -76,7 +76,7 @@ class PatientCRUDTests(TestCase):
 
         resp = auth_client(self.receptionist).get('/api/clinic/patients/')
         self.assertEqual(resp.status_code, 200)
-        names = [p['full_name'] for p in resp.data]
+        names = [p['full_name'] for p in resp.data['results']]
         self.assertIn('Clinic A Patient', names)
         self.assertNotIn('Clinic B Patient', names)
 
@@ -162,7 +162,7 @@ class VisitTests(TestCase):
         make_visit(self.clinic_id, self.patient, self.receptionist)
         resp = auth_client(self.doctor).get('/api/clinic/visits/?status=open')
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(all(v['status'] == 'open' for v in resp.data))
+        self.assertTrue(all(v['status'] == 'open' for v in resp.data['results']))
 
 
 class ConsultationTests(TestCase):

@@ -27,7 +27,7 @@ class UserListTests(TestCase):
     def test_admin_can_list_clinic_users(self):
         resp = auth_client(self.admin).get('/api/users/')
         self.assertEqual(resp.status_code, 200)
-        ids = [u['id'] for u in resp.data]
+        ids = [u['id'] for u in resp.data['results']]
         self.assertIn(str(self.doctor.id), ids)
         self.assertIn(str(self.receptionist.id), ids)
 
@@ -42,14 +42,14 @@ class UserListTests(TestCase):
     def test_admin_list_filtered_by_role(self):
         resp = auth_client(self.admin).get('/api/users/?role=doctor')
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(all(u['role'] == 'doctor' for u in resp.data))
+        self.assertTrue(all(u['role'] == 'doctor' for u in resp.data['results']))
 
     def test_clinic_isolation_admin_cannot_see_other_clinic_users(self):
         other_clinic_id = uuid.uuid4()
         other_user = make_user(other_clinic_id, 'doctor', 'Other Clinic Doctor')
 
         resp = auth_client(self.admin).get('/api/users/')
-        ids = [u['id'] for u in resp.data]
+        ids = [u['id'] for u in resp.data['results']]
         self.assertNotIn(str(other_user.id), ids)
 
 
