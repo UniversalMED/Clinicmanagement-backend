@@ -7,7 +7,7 @@ from rest_framework import status
 
 from .models import Patient, Visit, Consultation
 from .serializers import PatientSerializer, VisitSerializer, ConsultationSerializer
-from users.permissions import HasRole
+from users.permissions import HasPermission
 
 
 def _parse_uuid(value, field_name):
@@ -29,7 +29,7 @@ class PatientListView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasRole.for_roles('receptionist', 'admin')()]
+            return [HasPermission.for_permission('write_patient')()]
         return super().get_permissions()
 
     def get(self, request):
@@ -51,7 +51,7 @@ class PatientDetailView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'PATCH':
-            return [HasRole.for_roles('receptionist', 'admin')()]
+            return [HasPermission.for_permission('write_patient')()]
         return super().get_permissions()
 
     def _get_object(self, request, patient_id):
@@ -76,7 +76,7 @@ class VisitListView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasRole.for_roles('receptionist', 'admin')()]
+            return [HasPermission.for_permission('write_visit')()]
         return super().get_permissions()
 
     def get(self, request):
@@ -109,7 +109,7 @@ class VisitDetailView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'PATCH':
-            return [HasRole.for_roles('receptionist', 'admin', 'doctor')()]
+            return [HasPermission.for_permission('update_visit')()]
         return super().get_permissions()
 
     def _get_object(self, request, visit_id):
@@ -134,7 +134,7 @@ class ConsultationListView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasRole.for_roles('doctor')()]
+            return [HasPermission.for_permission('write_consultation')()]
         return super().get_permissions()
 
     def get(self, request):

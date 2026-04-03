@@ -8,7 +8,7 @@ from rest_framework import status
 
 from .models import Profile
 from .serializers import ProfileSerializer, AssignRoleSerializer, UpdateProfileSerializer, CreateUserSerializer
-from .permissions import IsAdmin, IsAdminOrSelf
+from .permissions import HasPermission, IsAdminOrSelf
 
 
 class CurrentUserView(APIView):
@@ -26,7 +26,7 @@ class UserListView(APIView):
     GET  /api/users/?role=<role>  — admin only, scoped to clinic
     POST /api/users/              — admin only, creates auth user + profile
     """
-    permission_classes = [IsAdmin]
+    permission_classes = [HasPermission.for_permission('manage_users')]
 
     def get(self, request):
         qs = Profile.objects.filter(clinic_id=request.user.clinic_id)
@@ -98,7 +98,7 @@ class AssignRoleView(APIView):
     PATCH /api/users/<user_id>/role/
     Admin only. Scoped to the admin's clinic to prevent cross-clinic role assignment.
     """
-    permission_classes = [IsAdmin]
+    permission_classes = [HasPermission.for_permission('manage_users')]
 
     def patch(self, request, user_id):
         profile = get_object_or_404(

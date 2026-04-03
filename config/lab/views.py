@@ -13,7 +13,7 @@ from .serializers import (
     TestResultSerializer,
 )
 from clinic.models import Visit
-from users.permissions import HasRole
+from users.permissions import HasPermission
 
 
 def _parse_uuid(value, field_name):
@@ -35,7 +35,7 @@ class LabTestListView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasRole.for_roles('admin')()]
+            return [HasPermission.for_permission('manage_lab_catalogue')()]
         return super().get_permissions()
 
     def get(self, request):
@@ -59,7 +59,7 @@ class LabTestDetailView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'PATCH':
-            return [HasRole.for_roles('admin')()]
+            return [HasPermission.for_permission('manage_lab_catalogue')()]
         return super().get_permissions()
 
     def _get_object(self, request, test_id):
@@ -84,7 +84,7 @@ class TestOrderListView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasRole.for_roles('doctor')()]
+            return [HasPermission.for_permission('order_lab_test')()]
         return super().get_permissions()
 
     def _clinic_visit_ids(self, request):
@@ -131,7 +131,7 @@ class TestOrderDetailView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'PATCH':
-            return [HasRole.for_roles('lab_tech', 'admin')()]
+            return [HasPermission.for_permission('process_lab_order')()]
         return super().get_permissions()
 
     def _get_object(self, request, order_id):
@@ -161,7 +161,7 @@ class TestResultListView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasRole.for_roles('lab_tech')()]
+            return [HasPermission.for_permission('write_lab_result')()]
         return super().get_permissions()
 
     def _clinic_order_ids(self, request):
