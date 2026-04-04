@@ -25,28 +25,39 @@ from rest_framework.permissions import BasePermission
 # ---------------------------------------------------------------------------
 ROLE_PERMISSIONS: dict[str, list[str]] = {
     'admin': [
-        'manage_users',          # list users, create users, assign roles
-        'manage_lab_catalogue',  # create and update lab test types
-        'write_patient',         # create and update patients
-        'write_visit',           # create visits
-        'update_visit',          # update visit status / assigned doctor
-        'process_lab_order',     # update lab order status, assign technician
-        'view_audit_log',        # read audit trail for the clinic
+        'manage_users',           # list users, create users, assign roles
+        'manage_lab_catalogue',   # create and update lab test types
+        'write_patient',          # create and update patients
+        'write_visit',            # create visits
+        'update_visit',           # update visit status / assigned doctor
+        'process_lab_order',      # update lab order status, assign technician
+        'view_audit_log',         # read audit trail for the clinic
+        'manage_billing',         # create invoices, add/remove items, finalize
+        'void_invoice',           # void a finalized invoice
+        'manage_appointments',    # book, update, cancel appointments
+        'reassign_appointment',   # mark doctor absent, reassign appointments
+        'manage_queue',           # check-in, call, no-show, reinsert
+        'start_visit_from_queue', # start and complete visits via queue
+        'reorder_queue',          # bulk reorder the waiting queue
     ],
     'doctor': [
-        'update_visit',          # update visit status / assigned doctor
-        'write_consultation',    # create consultations
-        'order_lab_test',        # create lab test orders
-        'write_prescription',    # create prescriptions
+        'update_visit',           # update visit status / assigned doctor
+        'write_consultation',     # create consultations
+        'order_lab_test',         # create lab test orders
+        'write_prescription',     # create prescriptions
+        'start_visit_from_queue', # start and complete visits via queue
     ],
     'lab_tech': [
-        'process_lab_order',     # update lab order status, assign technician
-        'write_lab_result',      # record test results
+        'process_lab_order',      # update lab order status, assign technician
+        'write_lab_result',       # record test results
     ],
     'receptionist': [
-        'write_patient',         # create and update patients
-        'write_visit',           # create visits
-        'update_visit',          # update visit status / assigned doctor
+        'write_patient',          # create and update patients
+        'write_visit',            # create visits
+        'update_visit',           # update visit status / assigned doctor
+        'manage_billing',         # create invoices, add/remove items, finalize
+        'manage_appointments',    # book, update, cancel appointments
+        'manage_queue',           # check-in, call, no-show, reinsert
     ],
 }
 
