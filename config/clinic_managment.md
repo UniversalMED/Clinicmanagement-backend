@@ -277,3 +277,20 @@ CREATE INDEX idx_notifications_recipient_status
   ON public.notifications(recipient_id, status);
 CREATE INDEX idx_notifications_clinic
   ON public.notifications(clinic_id);
+
+-- ============================================================
+-- Clinics (super admin tenant registry)
+-- ============================================================
+
+CREATE TABLE public.clinics (
+  id         uuid        NOT NULL DEFAULT uuid_generate_v4(),
+  name       text        NOT NULL,
+  slug       text        NOT NULL,
+  is_active  boolean     NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT clinics_pkey        PRIMARY KEY (id),
+  CONSTRAINT clinics_name_unique UNIQUE (name),
+  CONSTRAINT clinics_slug_unique UNIQUE (slug)
+);
+
+CREATE INDEX idx_clinics_slug ON public.clinics(slug);

@@ -21,7 +21,8 @@ def _get_jwks_client():
     return _jwks_client
 
 
-REQUIRED_ROLES = frozenset({'admin', 'doctor', 'lab_tech', 'receptionist'})
+CLINIC_ROLES   = frozenset({'admin', 'doctor', 'lab_tech', 'receptionist'})
+REQUIRED_ROLES = CLINIC_ROLES | frozenset({'super_admin'})
 
 
 class JWTUser:
@@ -30,13 +31,16 @@ class JWTUser:
     No database query is made during authentication — clinic_id and user_role
     are trusted from the token, which is signed by Supabase and injected at
     mint time via the custom_access_token_hook.
+
+    Super admin users have role='super_admin' and clinic_id=None.
+    All clinic-scoped users have a non-null clinic_id.
     """
     is_authenticated = True
     is_anonymous = False
 
-    def __init__(self, user_id: uuid.UUID, clinic_id: uuid.UUID, role: str):
+    def __init__(self, user_id: uuid.UUID, clinic_id, role: str):
         self.id = user_id
-        self.clinic_id = clinic_id
+        self.clinic_id = clinic_id   # None for super_admin
         self.role = role
 
     def __str__(self):
@@ -67,9 +71,8 @@ class SupabaseJWTAuthentication(BaseAuthentication):
         token = auth_header[7:].strip()
         payload = self._decode_token(token)
 
-        user_id   = self._require_claim(payload, "sub")
-        clinic_id = self._require_claim(payload, "clinic_id")
-        role      = self._require_claim(payload, "user_role")
+        user_id = self._require_claim(payload, "sub")
+        role    = self._require_claim(payload, "user_role")
 
         if role not in REQUIRED_ROLES:
             raise AuthenticationFailed(
@@ -77,10 +80,18 @@ class SupabaseJWTAuthentication(BaseAuthentication):
             )
 
         try:
-            parsed_user_id   = uuid.UUID(user_id)
-            parsed_clinic_id = uuid.UUID(clinic_id)
+            parsed_user_id = uuid.UUID(user_id)
         except (ValueError, AttributeError):
-            raise AuthenticationFailed("Token contains malformed UUID in sub or clinic_id.")
+            raise AuthenticationFailed("Token contains malformed UUID in 'sub'.")
+
+        # Super admin tokens have no clinic_id — that is valid and intentional.
+        parsed_clinic_id = None
+        if role != 'super_admin':
+            clinic_id = self._require_claim(payload, "clinic_id")
+            try:
+                parsed_clinic_id = uuid.UUID(clinic_id)
+            except (ValueError, AttributeError):
+                raise AuthenticationFailed("Token contains malformed UUID in 'clinic_id'.")
 
         return (JWTUser(parsed_user_id, parsed_clinic_id, role), token)
 

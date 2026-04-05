@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'billing',
     'patient_flow',
     'notifications',
+    'superadmin',
 ]
 
 MIDDLEWARE = [

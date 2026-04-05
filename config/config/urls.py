@@ -10,4 +10,5 @@ urlpatterns = [
     path('api/billing/', include('billing.urls')),
     path('api/queue/', include('patient_flow.urls')),
     path('api/notifications/', include('notifications.urls')),
+    path('api/superadmin/',   include('superadmin.urls')),
 ]
