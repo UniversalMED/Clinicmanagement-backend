@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Invoice, InvoiceLineItem
+from .models import Invoice, InvoiceLineItem, Payment
 
 
 class InvoiceLineItemSerializer(serializers.ModelSerializer):
@@ -79,3 +79,14 @@ class FinalizeInvoiceSerializer(serializers.Serializer):
 
 class VoidInvoiceSerializer(serializers.Serializer):
     void_reason = serializers.CharField(min_length=1)
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Payment
+        fields = [
+            'id', 'invoice_id', 'tx_ref', 'chapa_ref',
+            'amount', 'currency', 'status', 'mode',
+            'paid_at', 'created_at',
+        ]
+        read_only_fields = fields

@@ -1,26 +1,39 @@
+import hashlib
+import hmac
+import json
+import logging
 import uuid
 
+from django.conf import settings
 from django.db import transaction
-from django.db.models import Sum
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import Invoice, InvoiceLineItem
+from .models import Invoice, InvoiceLineItem, Payment
 from .serializers import (
     InvoiceSerializer,
     CreateInvoiceSerializer,
     AddLineItemSerializer,
     FinalizeInvoiceSerializer,
     VoidInvoiceSerializer,
+    PaymentSerializer,
+)
+from .services import (
+    BillingError,
+    finalize_invoice, void_invoice, recompute_invoice_totals,
+    initiate_payment, process_chapa_webhook,
 )
 from clinic.models import Visit
 from lab.models import LabTest, TestOrder
 from users.permissions import HasPermission
 from core.querysets import PaginatedListMixin
 from audit.mixins import AuditLogMixin
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_uuid(value, field_name):
@@ -31,21 +44,6 @@ def _parse_uuid(value, field_name):
             {field_name: 'Must be a valid UUID.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
-
-def _recompute_invoice_totals(invoice, discount_amount=None):
-    """Recompute subtotal and total_amount from current line items. Save in place."""
-    subtotal = (
-        InvoiceLineItem.objects.filter(invoice_id=invoice.id)
-        .aggregate(total=Sum('subtotal'))['total'] or 0
-    )
-    if discount_amount is None:
-        discount_amount = invoice.discount_amount
-    total = max(subtotal - discount_amount, 0)
-    invoice.subtotal = subtotal
-    invoice.discount_amount = discount_amount
-    invoice.total_amount = total
-    invoice.save(update_fields=['subtotal', 'discount_amount', 'total_amount'])
 
 
 class InvoiceListView(AuditLogMixin, PaginatedListMixin, APIView):
@@ -190,7 +188,7 @@ class InvoiceLineItemsView(AuditLogMixin, APIView):
                 subtotal=subtotal,
                 notes=data.get('notes', ''),
             )
-            _recompute_invoice_totals(invoice)
+            recompute_invoice_totals(invoice)
 
         self.log_action(request, 'update', 'invoice', invoice.id)
         from .serializers import InvoiceLineItemSerializer
@@ -217,7 +215,7 @@ class InvoiceLineItemDetailView(AuditLogMixin, APIView):
 
         with transaction.atomic():
             line_item.delete()
-            _recompute_invoice_totals(invoice)
+            recompute_invoice_totals(invoice)
 
         self.log_action(request, 'update', 'invoice', invoice.id)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -233,62 +231,19 @@ class InvoiceFinalizeView(AuditLogMixin, APIView):
         invoice = get_object_or_404(
             Invoice.objects.for_clinic(request.user.clinic_id), id=invoice_id
         )
-
-        if invoice.status != 'draft':
-            return Response(
-                {'detail': 'Only draft invoices can be finalized.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        line_items = list(InvoiceLineItem.objects.filter(invoice_id=invoice.id))
-        if not line_items:
-            return Response(
-                {'detail': 'Invoice must have at least one line item before finalization.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = FinalizeInvoiceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        discount = data.get('discount_amount', 0)
-
-        # Guard: no test order already billed on a different invoice
-        order_ids = [li.test_order_id for li in line_items if li.test_order_id]
-        if order_ids:
-            conflicting = list(
-                TestOrder.objects.filter(id__in=order_ids)
-                .exclude(billed_invoice_id__isnull=True)
-                .values_list('id', flat=True)
+        try:
+            finalize_invoice(
+                invoice=invoice,
+                finalized_by_id=request.user.id,
+                discount_amount=data.get('discount_amount', 0),
+                notes=data.get('notes'),
             )
-            if conflicting:
-                return Response(
-                    {
-                        'detail': 'One or more test orders are already billed on another invoice.',
-                        'conflicting_orders': [str(oid) for oid in conflicting],
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        subtotal     = sum(li.subtotal for li in line_items)
-        total_amount = max(subtotal - discount, 0)
-
-        with transaction.atomic():
-            invoice.status          = 'finalized'
-            invoice.subtotal        = subtotal
-            invoice.discount_amount = discount
-            invoice.total_amount    = total_amount
-            invoice.finalized_by    = request.user.id
-            invoice.finalized_at    = timezone.now()
-            if data.get('notes'):
-                invoice.notes = data['notes']
-            invoice.save()
-
-            # Stamp every billed test order so they can't be double-billed
-            if order_ids:
-                TestOrder.objects.filter(id__in=order_ids).update(
-                    billed_invoice_id=invoice.id
-                )
+        except BillingError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         self.log_action(request, 'update', 'invoice', invoice.id)
         return Response(InvoiceSerializer(invoice).data)
@@ -305,34 +260,107 @@ class InvoiceVoidView(AuditLogMixin, APIView):
         invoice = get_object_or_404(
             Invoice.objects.for_clinic(request.user.clinic_id), id=invoice_id
         )
-
-        if invoice.status != 'finalized':
-            return Response(
-                {'detail': 'Only finalized invoices can be voided.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = VoidInvoiceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        order_ids = list(
-            InvoiceLineItem.objects.filter(invoice_id=invoice.id)
-            .exclude(test_order_id__isnull=True)
-            .values_list('test_order_id', flat=True)
-        )
-
-        with transaction.atomic():
-            # Release test orders so they can be re-billed on a new invoice
-            if order_ids:
-                TestOrder.objects.filter(
-                    id__in=order_ids, billed_invoice_id=invoice.id
-                ).update(billed_invoice_id=None)
-
-            invoice.status      = 'void'
-            invoice.voided_by   = request.user.id
-            invoice.voided_at   = timezone.now()
-            invoice.void_reason = serializer.validated_data['void_reason']
-            invoice.save()
+        try:
+            void_invoice(
+                invoice=invoice,
+                voided_by_id=request.user.id,
+                void_reason=serializer.validated_data['void_reason'],
+            )
+        except BillingError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         self.log_action(request, 'update', 'invoice', invoice.id)
         return Response(InvoiceSerializer(invoice).data)
+
+
+class InvoicePayView(AuditLogMixin, APIView):
+    """
+    POST /api/billing/invoices/<id>/pay/
+    Initiate a Chapa payment for a finalized invoice.
+    Returns a checkout_url to redirect the payer.
+    """
+    permission_classes = [HasPermission.for_permission('manage_billing')]
+
+    def post(self, request, invoice_id):
+        invoice = get_object_or_404(
+            Invoice.objects.for_clinic(request.user.clinic_id), id=invoice_id
+        )
+        callback_url = request.data.get('callback_url', '')
+        return_url   = request.data.get('return_url', '')
+
+        try:
+            payment, checkout_url = initiate_payment(
+                invoice=invoice,
+                initiated_by_id=request.user.id,
+                callback_url=callback_url,
+                return_url=return_url,
+            )
+        except BillingError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        self.log_action(request, 'create', 'payment', payment.id)
+        return Response({
+            'payment':      PaymentSerializer(payment).data,
+            'checkout_url': checkout_url,
+        }, status=status.HTTP_201_CREATED)
+
+
+class InvoicePaymentListView(PaginatedListMixin, APIView):
+    """
+    GET /api/billing/invoices/<id>/payments/
+    List all payment attempts for an invoice.
+    """
+    def get(self, request, invoice_id):
+        get_object_or_404(
+            Invoice.objects.for_clinic(request.user.clinic_id), id=invoice_id
+        )
+        qs = Payment.objects.for_clinic(request.user.clinic_id).filter(
+            invoice_id=invoice_id
+        )
+        return self.paginate(qs, PaymentSerializer, request)
+
+
+class ChapaWebhookView(APIView):
+    """
+    POST /api/billing/webhook/chapa/
+
+    Receives payment confirmation from Chapa.
+    - No JWT auth (webhook comes from Chapa, not a clinic user).
+    - Verified via HMAC-SHA256 signature.
+    - Must return HTTP 200 or Chapa retries every 10 min for 72 hours.
+    """
+    authentication_classes = []
+    permission_classes      = [AllowAny]
+
+    def post(self, request):
+        # Verify signature
+        secret = getattr(settings, 'CHAPA_WEBHOOK_SECRET', '')
+        if secret:
+            sig = (
+                request.headers.get('x-chapa-signature') or
+                request.headers.get('Chapa-Signature', '')
+            )
+            body = request.body
+            expected = hmac.new(
+                secret.encode('utf-8'), body, hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(expected, sig):
+                logger.warning('Chapa webhook signature mismatch')
+                return Response({'detail': 'Invalid signature.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payload = json.loads(request.body)
+        except json.JSONDecodeError:
+            return Response({'detail': 'Invalid JSON.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            process_chapa_webhook(payload)
+        except BillingError as exc:
+            logger.error('Chapa webhook processing error: %s', exc)
+            # Still return 200 to stop Chapa retrying for unresolvable errors
+            return Response({'detail': str(exc)})
+
+        return Response({'detail': 'ok'})

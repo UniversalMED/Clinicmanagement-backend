@@ -45,3 +45,30 @@ class InvoiceLineItem(BaseModel):
     class Meta:
         db_table = "invoice_line_items"
         managed = False
+
+
+PAYMENT_STATUS_CHOICES = [
+    ('pending', 'Pending'),
+    ('success', 'Success'),
+    ('failed',  'Failed'),
+]
+
+
+class Payment(BaseModel):
+    objects = ClinicScopedManager()
+
+    clinic_id   = models.UUIDField()
+    invoice_id  = models.UUIDField()
+    initiated_by = models.UUIDField()
+    tx_ref      = models.TextField(unique=True)   # our reference sent to Chapa
+    chapa_ref   = models.TextField(null=True, blank=True)  # Chapa's reference
+    amount      = models.DecimalField(max_digits=10, decimal_places=2)
+    currency    = models.TextField(default='ETB')
+    status      = models.TextField(choices=PAYMENT_STATUS_CHOICES, default='pending')
+    mode        = models.TextField(default='test')   # 'test' | 'live'
+    paid_at     = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'payments'
+        managed  = False
+        ordering = ['-created_at']

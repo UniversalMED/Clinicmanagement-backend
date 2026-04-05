@@ -294,3 +294,28 @@ CREATE TABLE public.clinics (
 );
 
 CREATE INDEX idx_clinics_slug ON public.clinics(slug);
+
+-- ============================================================
+-- Payments (Chapa payment integration)
+-- ============================================================
+
+CREATE TABLE public.payments (
+  id           uuid          NOT NULL DEFAULT uuid_generate_v4(),
+  clinic_id    uuid          NOT NULL REFERENCES public.clinics(id),
+  invoice_id   uuid          NOT NULL REFERENCES public.invoices(id),
+  initiated_by uuid          REFERENCES public.profiles(id),
+  tx_ref       text          NOT NULL UNIQUE,          -- our reference sent to Chapa
+  chapa_ref    text,                                   -- Chapa's own reference
+  amount       numeric(10,2) NOT NULL,
+  currency     text          NOT NULL DEFAULT 'ETB',
+  status       text          NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending','success','failed')),
+  mode         text          NOT NULL DEFAULT 'test',  -- 'test' | 'live'
+  paid_at      timestamptz,
+  created_at   timestamptz   NOT NULL DEFAULT now(),
+  CONSTRAINT payments_pkey PRIMARY KEY (id)
+);
+
+CREATE INDEX idx_payments_invoice  ON public.payments(invoice_id);
+CREATE INDEX idx_payments_clinic   ON public.payments(clinic_id);
+CREATE INDEX idx_payments_tx_ref   ON public.payments(tx_ref);
