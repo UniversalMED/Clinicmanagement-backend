@@ -1,0 +1,85 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Web — Django + Gunicorn
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: clinic-backend
+    runtime: python
+    buildCommand: ./build.sh
+    startCommand: cd config && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /api/health/
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: clinic-redis
+          property: connectionString
+      # --- Set these manually in Render dashboard ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: CHAPA_SECRET_KEY
+        sync: false
+      - key: CHAPA_WEBHOOK_SECRET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Celery worker — processes notifications and async tasks
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: clinic-celery
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd config && celery -A config.celery worker --loglevel=info --concurrency 2
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: clinic-backend
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DEBUG
+        value: "False"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: clinic-redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Redis — Celery broker + result backend
+  # ---------------------------------------------------------------------------
+  - type: redis
+    name: clinic-redis
+    plan: free
+    maxmemoryPolicy: noeviction
