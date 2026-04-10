@@ -302,7 +302,8 @@ class QueueListView(PaginatedListMixin, APIView):
 
         status_filter = request.query_params.get('status', 'waiting')
         if status_filter:
-            qs = qs.filter(status=status_filter)
+            statuses = [s.strip() for s in status_filter.split(',')]
+            qs = qs.filter(status__in=statuses)
 
         doctor_id = request.query_params.get('doctor_id')
         if doctor_id:

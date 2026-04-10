@@ -10,14 +10,22 @@ class LabTestSerializer(serializers.ModelSerializer):
 
 
 class TestOrderSerializer(serializers.ModelSerializer):
+    test_name = serializers.SerializerMethodField()
+
     class Meta:
         model = TestOrder
         fields = [
-            'id', 'visit_id', 'consultation_id', 'test_id', 'ordered_by',
-            'assigned_to', 'status', 'is_billable', 'price_at_order_time',
-            'billed_invoice_id', 'created_at',
+            'id', 'visit_id', 'consultation_id', 'test_id', 'test_name',
+            'ordered_by', 'assigned_to', 'status', 'is_billable',
+            'price_at_order_time', 'billed_invoice_id', 'created_at',
         ]
         read_only_fields = ['id', 'ordered_by', 'price_at_order_time', 'billed_invoice_id', 'created_at']
+
+    def get_test_name(self, obj):
+        try:
+            return LabTest.objects.get(id=obj.test_id).name
+        except LabTest.DoesNotExist:
+            return None
 
 
 class TestOrderUpdateSerializer(serializers.Serializer):

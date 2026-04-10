@@ -1,0 +1,375 @@
+# Clinic Management Frontend — Cursor Rules
+# Paste this file as `.cursorrules` in your project root.
+# Cursor reads it automatically on every prompt in this project.
+
+## Project Overview
+You are building the React frontend for a multi-tenant clinic management system.
+The backend is Django REST Framework + Supabase Auth (JWT). Every request must
+carry a `Authorization: Bearer <supabase_jwt>` header. All data is scoped to
+`clinic_id` on the server — the frontend never needs to filter by clinic_id itself.
+
+## Tech Stack (do not suggest alternatives)
+- React 18 + TypeScript (strict mode)
+- Vite
+- React Router v6 (createBrowserRouter)
+- TanStack Query v5 (useQuery / useMutation)
+- Zustand (auth store + ui store)
+- Tailwind CSS + shadcn/ui
+- Axios (single instance in src/api/client.ts)
+- @supabase/supabase-js (auth only — session management)
+- react-hook-form + zod (all forms)
+- date-fns (date formatting)
+
+## Folder Structure
+src/
+├── api/              # one file per Django app
+│   ├── client.ts     # axios instance — injects JWT from Supabase session
+│   ├── auth.ts
+│   ├── users.ts
+│   ├── patients.ts
+│   ├── visits.ts
+│   ├── lab.ts
+│   ├── billing.ts
+│   ├── queue.ts
+│   ├── notifications.ts
+│   └── audit.ts
+├── types/            # TypeScript interfaces matching backend serializers
+│   ├── user.types.ts
+│   ├── patient.types.ts
+│   ├── lab.types.ts
+│   ├── billing.types.ts
+│   ├── queue.types.ts
+│   └── api.types.ts  # PaginatedResponse<T>, ApiError
+├── store/
+│   ├── auth.store.ts  # user, role, clinic_id, isLoading — Zustand
+│   └── ui.store.ts    # sidebar open/closed, toasts
+├── hooks/             # TanStack Query wrappers — one per api/ file
+│   ├── useAuth.ts     # reads auth.store, exposes hasPermission(p: Permission)
+│   ├── usePatients.ts
+│   ├── useVisits.ts
+│   ├── useLab.ts
+│   ├── useBilling.ts
+│   ├── useQueue.ts    # refetchInterval: 30_000
+│   └── useNotifications.ts
+├── components/
+│   ├── layout/
+│   │   ├── AppShell.tsx
+│   │   ├── Sidebar.tsx  # role-aware: filters nav items via hasPermission()
+│   │   └── Topbar.tsx
+│   ├── ui/              # generic: wrap shadcn/ui components here
+│   │   ├── DataTable.tsx      # handles PaginatedResponse<T>
+│   │   ├── StatusBadge.tsx    # maps status strings → colour
+│   │   ├── PermissionGate.tsx # <PermissionGate permission="write_patient">
+│   │   └── ...
+│   ├── patients/
+│   ├── queue/
+│   ├── lab/
+│   └── billing/
+├── pages/
+│   ├── Login.tsx
+│   ├── Dashboard.tsx
+│   ├── Patients.tsx · PatientDetail.tsx
+│   ├── Visits.tsx · VisitDetail.tsx
+│   ├── Queue.tsx
+│   ├── Lab.tsx · LabOrderDetail.tsx
+│   ├── Billing.tsx · InvoiceDetail.tsx
+│   ├── Users.tsx         # admin only
+│   └── Audit.tsx         # admin only
+├── router/
+│   ├── index.tsx          # all routes
+│   └── ProtectedRoute.tsx # checks auth + role
+└── utils/
+    ├── permissions.ts     # ROLE_PERMISSIONS map (see below)
+    ├── formatters.ts      # ETB currency, dates, phone
+    └── queryKeys.ts       # TanStack Query key factory
+
+## Backend API — All Endpoints
+
+### Auth (Supabase — not Django)
+- Login/logout handled by @supabase/supabase-js
+- After login call GET /api/users/me/ to load the user profile into Zustand
+
+### Users  GET/POST /api/users/
+- GET /api/users/me/
+- GET /api/users/                      admin only, ?role=
+- POST /api/users/                     admin only
+- PATCH /api/users/<id>/role/          admin only
+- PATCH /api/users/<id>/               admin or self
+
+### Clinic
+- GET/POST   /api/clinic/patients/
+- GET/PATCH  /api/clinic/patients/<id>/
+- GET/POST   /api/clinic/visits/
+- GET/PATCH  /api/clinic/visits/<id>/
+- GET/POST   /api/clinic/consultations/
+- GET        /api/clinic/consultations/<id>/
+
+### Lab
+- GET/POST   /api/lab/tests/           GET: any | POST: admin
+- GET/PATCH  /api/lab/tests/<id>/
+- GET/POST   /api/lab/orders/          GET: any | POST: doctor
+- GET/PATCH  /api/lab/orders/<id>/     PATCH: lab_tech, admin
+- GET/POST   /api/lab/results/         GET: any | POST: lab_tech
+- GET        /api/lab/results/<id>/
+
+### Billing
+- GET/POST   /api/billing/invoices/                          ?visit_id= ?status= ?patient_id=
+- GET        /api/billing/invoices/<id>/
+- POST       /api/billing/invoices/<id>/items/               add line item
+- DELETE     /api/billing/invoices/<id>/items/<item_id>/
+- POST       /api/billing/invoices/<id>/finalize/            { discount_amount, notes }
+- POST       /api/billing/invoices/<id>/void/                { void_reason } — admin only
+- POST       /api/billing/invoices/<id>/pay/                 Chapa → returns { checkout_url, qr_code }
+- POST       /api/billing/invoices/<id>/pay-cash/            instant cash payment
+- GET        /api/billing/invoices/<id>/payments/
+- POST       /api/billing/webhook/chapa/                     no auth — HMAC verified server-side
+
+### Queue / Patient Flow
+- GET/POST   /api/queue/appointments/
+- GET/PATCH  /api/queue/appointments/<id>/
+- POST       /api/queue/appointments/<id>/cancel/
+- POST       /api/queue/appointments/<id>/affected/
+- POST       /api/queue/appointments/<id>/reassign/
+- POST       /api/queue/check-in/                            { patient_id } or { appointment_id }
+- GET        /api/queue/                                     ?status= ?doctor_id=
+- POST       /api/queue/<id>/call/
+- POST       /api/queue/<id>/no-show/
+- POST       /api/queue/<id>/reinsert/
+- POST       /api/queue/<id>/start-visit/
+- POST       /api/queue/<id>/complete/
+- POST       /api/queue/reorder/                             { positions: [{id, queue_position}] }
+- GET        /api/queue/<id>/history/
+
+### Notifications
+- GET        /api/notifications/                             ?status=pending|delivered|failed
+- POST       /api/notifications/<id>/acknowledge/
+
+### Audit
+- GET        /api/audit/logs/                                admin only
+
+## Pagination
+All list endpoints return:
+```ts
+interface PaginatedResponse<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+}
+```
+Always use ?page= and ?page_size= (max 100, default 25).
+
+## TypeScript Types (core — generate the rest from these patterns)
+
+```ts
+// user.types.ts
+export type Role = 'admin' | 'doctor' | 'lab_tech' | 'receptionist'
+export type Permission =
+  | 'manage_users' | 'manage_lab_catalogue' | 'write_patient'
+  | 'write_visit' | 'update_visit' | 'process_lab_order'
+  | 'view_audit_log' | 'manage_billing' | 'void_invoice'
+  | 'manage_appointments' | 'reassign_appointment' | 'manage_queue'
+  | 'start_visit_from_queue' | 'reorder_queue' | 'write_consultation'
+  | 'order_lab_test' | 'write_prescription' | 'write_lab_result'
+
+export interface Profile {
+  id: string
+  clinic_id: string
+  full_name: string
+  role: Role
+  created_at: string
+}
+
+// patient.types.ts
+export interface Patient {
+  id: string; clinic_id: string; full_name: string
+  gender: 'M' | 'F' | 'other'; date_of_birth: string
+  phone: string; created_at: string
+}
+export interface Visit {
+  id: string; clinic_id: string; patient_id: string
+  created_by: string; assigned_doctor_id: string | null
+  status: 'open' | 'closed'; created_at: string
+}
+export interface Consultation {
+  id: string; visit_id: string; doctor_id: string
+  symptoms: string; diagnosis: string; notes: string; created_at: string
+}
+
+// queue.types.ts
+export type QueueStatus = 'checked_in' | 'waiting' | 'called' | 'in_progress' | 'completed' | 'no_show'
+export interface QueueEntry {
+  id: string; clinic_id: string; patient_id: string
+  appointment_id: string | null; visit_id: string | null
+  status: QueueStatus; queue_position: number | null
+  entry_type: 'appointment' | 'walk_in'; priority_override: number
+  scheduled_at: string | null; checked_in_at: string | null
+  called_at: string | null; in_progress_at: string | null
+  completed_at: string | null; no_show_at: string | null
+  assigned_doctor_id: string | null; created_at: string
+}
+export type AppointmentStatus = 'active' | 'cancelled' | 'completed' | 'affected'
+export interface Appointment {
+  id: string; clinic_id: string; patient_id: string; doctor_id: string | null
+  scheduled_at: string; duration_minutes: number
+  type: 'specialist' | 'general'; notes: string
+  status: AppointmentStatus; created_at: string
+}
+
+// billing.types.ts
+export type InvoiceStatus = 'draft' | 'finalized' | 'void'
+export interface Invoice {
+  id: string; clinic_id: string; visit_id: string; patient_id: string
+  issued_by: string; finalized_by: string | null; voided_by: string | null
+  status: InvoiceStatus; subtotal: string; discount_amount: string
+  total_amount: string; notes: string
+  finalized_at: string | null; voided_at: string | null
+  void_reason: string | null; created_at: string
+}
+export interface InvoiceLineItem {
+  id: string; invoice_id: string; test_order_id: string | null
+  test_name: string; unit_price: string; quantity: number
+  subtotal: string; notes: string; created_at: string
+}
+export type PaymentStatus = 'pending' | 'success' | 'failed'
+export interface Payment {
+  id: string; clinic_id: string; invoice_id: string
+  tx_ref: string; amount: string; currency: string
+  status: PaymentStatus; method: 'chapa' | 'cash'
+  chapa_ref: string; mode: string; paid_at: string | null; created_at: string
+}
+
+// lab.types.ts
+export type TestOrderStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+export interface LabTest {
+  id: string; clinic_id: string; name: string
+  description: string; price: string; is_active: boolean
+  created_by: string; created_at: string
+}
+export interface TestOrder {
+  id: string; visit_id: string; consultation_id: string | null
+  test_id: string; ordered_by: string; assigned_to: string | null
+  status: TestOrderStatus; is_billable: boolean
+  price_at_order_time: string; billed_invoice_id: string | null; created_at: string
+}
+export interface TestResult {
+  id: string; test_order_id: string; technician_id: string
+  result_data: Record<string, unknown>; remarks: string; created_at: string
+}
+```
+
+## Permissions Map (utils/permissions.ts)
+```ts
+export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
+  admin: [
+    'manage_users', 'manage_lab_catalogue', 'write_patient', 'write_visit',
+    'update_visit', 'process_lab_order', 'view_audit_log', 'manage_billing',
+    'void_invoice', 'manage_appointments', 'reassign_appointment', 'manage_queue',
+    'start_visit_from_queue', 'reorder_queue',
+  ],
+  doctor: [
+    'update_visit', 'write_consultation', 'order_lab_test',
+    'write_prescription', 'start_visit_from_queue',
+  ],
+  lab_tech: ['process_lab_order', 'write_lab_result'],
+  receptionist: [
+    'write_patient', 'write_visit', 'update_visit',
+    'manage_billing', 'manage_appointments', 'manage_queue',
+  ],
+}
+
+export function hasPermission(role: Role, permission: Permission): boolean {
+  return ROLE_PERMISSIONS[role]?.includes(permission) ?? false
+}
+```
+
+## Key Implementation Rules
+
+### api/client.ts
+```ts
+// Always structure it this way — never import this pattern, generate it:
+import axios from 'axios'
+import { supabase } from '../lib/supabase'
+
+const client = axios.create({ baseURL: import.meta.env.VITE_API_URL })
+
+client.interceptors.request.use(async (config) => {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// Intercept 401 → sign out and redirect to /login
+client.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    if (error.response?.status === 401) {
+      await supabase.auth.signOut()
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+export default client
+```
+
+### API functions pattern
+```ts
+// Every api/ file follows this pattern exactly:
+export const getPatients = (params?: { page?: number; page_size?: number }) =>
+  client.get<PaginatedResponse<Patient>>('/api/clinic/patients/', { params }).then(r => r.data)
+
+export const createPatient = (data: Omit<Patient, 'id' | 'clinic_id' | 'created_at'>) =>
+  client.post<Patient>('/api/clinic/patients/', data).then(r => r.data)
+```
+
+### TanStack Query keys (utils/queryKeys.ts)
+```ts
+export const queryKeys = {
+  patients: { all: ['patients'] as const, list: (p: object) => ['patients', p] as const, detail: (id: string) => ['patients', id] as const },
+  queue:    { all: ['queue'] as const,    list: (p: object) => ['queue', p] as const },
+  // ... same pattern for all entities
+}
+```
+
+### ProtectedRoute
+```tsx
+// Never allow a page to render if the user lacks the required permission.
+// Redirect to /dashboard with a toast if unauthorised, to /login if unauthenticated.
+```
+
+### DataTable
+```tsx
+// Must handle PaginatedResponse<T>, show page controls, and accept a columns prop.
+// Use TanStack Table (already included with shadcn/ui table primitive).
+```
+
+### useQueue hook
+```ts
+// Must use refetchInterval: 30_000 so the queue stays live.
+// Expose the raw query + action mutations: callPatient, markNoShow, reinsert, startVisit, complete.
+```
+
+### Queue state machine — valid transitions only
+checked_in → waiting → called → in_progress → completed
+called → no_show
+no_show → waiting (reinsert)
+// Never show an action button for an invalid transition.
+
+### Billing flow
+// Invoice lifecycle: draft → (add line items) → finalize → pay
+// Pay returns { checkout_url, qr_code } — render qr_code as <img src={qr_code} />
+// Cash payment via /pay-cash/ — no redirect needed
+// Void is admin-only — gate behind hasPermission('void_invoice')
+
+## Code Style
+- Functional components only, no class components
+- Every component and hook has explicit TypeScript return types
+- Use named exports, not default exports for components (except pages)
+- Zod schemas live next to their form component
+- Never use `any` — use `unknown` then narrow
+- Format currency as ETB: `new Intl.NumberFormat('am-ET', { style: 'currency', currency: 'ETB' }).format(amount)`
+- All dates via date-fns: `format(parseISO(dateString), 'dd MMM yyyy, HH:mm')`
+- Error boundaries on every page
+- All mutations show a toast on success and on error (use shadcn/ui Toaster)

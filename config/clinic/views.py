@@ -97,10 +97,13 @@ class VisitListView(AuditLogMixin, PaginatedListMixin, APIView):
         qs = Visit.objects.for_clinic(request.user.clinic_id)
         status_filter = request.query_params.get('status')
         patient_id    = request.query_params.get('patient_id')
+        date          = request.query_params.get('date')
         if status_filter:
             qs = qs.filter(status=status_filter)
         if patient_id:
             qs = qs.filter(patient_id=patient_id)
+        if date:
+            qs = qs.filter(created_at__date=date)
         return self.paginate(qs, VisitSerializer, request)
 
     def post(self, request):

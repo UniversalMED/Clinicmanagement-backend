@@ -61,15 +61,18 @@ class InvoiceListView(AuditLogMixin, PaginatedListMixin, APIView):
 
     def get(self, request):
         qs = Invoice.objects.for_clinic(request.user.clinic_id)
-        visit_id   = request.query_params.get('visit_id')
-        patient_id = request.query_params.get('patient_id')
-        status_f   = request.query_params.get('status')
+        visit_id          = request.query_params.get('visit_id')
+        patient_id        = request.query_params.get('patient_id')
+        status_f          = request.query_params.get('status')
+        finalized_at_date = request.query_params.get('finalized_at_date')
         if visit_id:
             qs = qs.filter(visit_id=visit_id)
         if patient_id:
             qs = qs.filter(patient_id=patient_id)
         if status_f:
             qs = qs.filter(status=status_f)
+        if finalized_at_date:
+            qs = qs.filter(finalized_at__date=finalized_at_date)
         return self.paginate(qs, InvoiceSerializer, request)
 
     def post(self, request):

@@ -104,6 +104,12 @@ class TestOrderListView(AuditLogMixin, PaginatedListMixin, APIView):
         visit_id = request.query_params.get('visit_id')
         if visit_id:
             qs = qs.filter(visit_id=visit_id)
+        patient_id = request.query_params.get('patient_id')
+        if patient_id:
+            patient_visit_ids = Visit.objects.for_clinic(request.user.clinic_id).filter(
+                patient_id=patient_id
+            ).values_list('id', flat=True)
+            qs = qs.filter(visit_id__in=patient_visit_ids)
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
