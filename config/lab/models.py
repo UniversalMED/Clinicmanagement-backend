@@ -3,10 +3,11 @@ from core.models import BaseModel
 from core.querysets import ClinicScopedManager
 
 TEST_ORDER_STATUS_CHOICES = [
-    ('pending',     'Pending'),
-    ('in_progress', 'In Progress'),
-    ('completed',   'Completed'),
-    ('canceled',    'Canceled'),
+    ('awaiting_payment', 'Awaiting Payment'),
+    ('pending',          'Pending'),
+    ('in_progress',      'In Progress'),
+    ('completed',        'Completed'),
+    ('canceled',         'Canceled'),
 ]
 
 
@@ -31,7 +32,7 @@ class TestOrder(BaseModel):
     test_id              = models.UUIDField()
     ordered_by           = models.UUIDField()
     assigned_to          = models.UUIDField(null=True, blank=True)
-    status               = models.TextField(choices=TEST_ORDER_STATUS_CHOICES, default="pending")
+    status               = models.TextField(choices=TEST_ORDER_STATUS_CHOICES, default="awaiting_payment")
     is_billable          = models.BooleanField(default=True)
     price_at_order_time  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     billed_invoice_id    = models.UUIDField(null=True, blank=True)

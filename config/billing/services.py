@@ -222,11 +222,14 @@ def process_chapa_webhook(payload: dict) -> Payment | None:
         payment.save(update_fields=['status'])
         return payment
 
-    payment.status    = 'success'
-    payment.chapa_ref = verification.get('reference', '')
-    payment.mode      = verification.get('mode', 'test')
-    payment.paid_at   = timezone.now()
-    payment.save(update_fields=['status', 'chapa_ref', 'mode', 'paid_at'])
+    with transaction.atomic():
+        payment.status    = 'success'
+        payment.chapa_ref = verification.get('reference', '')
+        payment.mode      = verification.get('mode', 'test')
+        payment.paid_at   = timezone.now()
+        payment.save(update_fields=['status', 'chapa_ref', 'mode', 'paid_at'])
+
+        _release_test_orders(payment.invoice_id)
 
     return payment
 def generate_qr_code(url: str) -> str:
@@ -272,7 +275,7 @@ def record_cash_payment(invoice, received_by_id) -> Payment:
     if existing:
         raise BillingError('This invoice has already been paid.')
 
-    return Payment.objects.create(
+    payment = Payment.objects.create(
         clinic_id=invoice.clinic_id,
         invoice_id=invoice.id,
         initiated_by=received_by_id,
@@ -283,6 +286,25 @@ def record_cash_payment(invoice, received_by_id) -> Payment:
         mode='cash',
         paid_at=timezone.now(),
     )
+    _release_test_orders(invoice.id)
+    return payment
+
+
+def _release_test_orders(invoice_id):
+    """
+    Flip all test orders on a paid invoice from 'awaiting_payment' → 'pending'
+    so lab techs can see and process them.
+    Called after both cash and Chapa payment success.
+    """
+    order_ids = list(
+        InvoiceLineItem.objects.filter(invoice_id=invoice_id)
+        .exclude(test_order_id__isnull=True)
+        .values_list('test_order_id', flat=True)
+    )
+    if order_ids:
+        TestOrder.objects.filter(
+            id__in=order_ids, status='awaiting_payment'
+        ).update(status='pending')
 
 
 @transaction.atomic
@@ -313,7 +335,7 @@ def void_invoice(invoice, voided_by_id, void_reason):
     if order_ids:
         TestOrder.objects.filter(
             id__in=order_ids, billed_invoice_id=invoice.id
-        ).update(billed_invoice_id=None)
+        ).update(billed_invoice_id=None, status='awaiting_payment')
 
     invoice.status      = 'void'
     invoice.voided_by   = voided_by_id

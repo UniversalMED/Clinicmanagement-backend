@@ -113,45 +113,43 @@ class TestOrderListView(AuditLogMixin, PaginatedListMixin, APIView):
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
-        # ?unbilled=true  — orders not yet on any finalized invoice
+        # ?unbilled=true  — orders not yet on any invoice
         if request.query_params.get('unbilled') == 'true':
             qs = qs.filter(billed_invoice_id__isnull=True)
-        # ?billable=true  — completed, billable, not yet invoiced (ready-to-bill shortcut)
-        if request.query_params.get('billable') == 'true':
-            qs = qs.filter(is_billable=True, status='completed', billed_invoice_id__isnull=True)
+        # ?pending_payment=true  — ordered but not yet added to an invoice (receptionist billing queue)
+        if request.query_params.get('pending_payment') == 'true':
+            qs = qs.filter(status='awaiting_payment', billed_invoice_id__isnull=True)
         return self.paginate(qs, TestOrderSerializer, request)
 
     def post(self, request):
         visit_id = request.data.get('visit_id')
-        if visit_id:
-            parsed, err = _parse_uuid(visit_id, 'visit_id')
-            if err:
-                return err
-            get_object_or_404(Visit.objects.for_clinic(request.user.clinic_id), id=parsed)
+        if not visit_id:
+            return Response({'visit_id': 'This field is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        parsed_visit, err = _parse_uuid(visit_id, 'visit_id')
+        if err:
+            return err
+        get_object_or_404(Visit.objects.for_clinic(request.user.clinic_id), id=parsed_visit)
 
-        lab_test = None
         test_id = request.data.get('test_id')
-        if test_id:
-            parsed, err = _parse_uuid(test_id, 'test_id')
-            if err:
-                return err
-            lab_test = get_object_or_404(
-                LabTest.objects.for_clinic(request.user.clinic_id), id=parsed, is_active=True
-            )
+        if not test_id:
+            return Response({'test_id': 'This field is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        parsed_test, err = _parse_uuid(test_id, 'test_id')
+        if err:
+            return err
+        lab_test = get_object_or_404(
+            LabTest.objects.for_clinic(request.user.clinic_id), id=parsed_test, is_active=True
+        )
 
         serializer = TestOrderSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        save_kwargs = {'ordered_by': request.user.id}
-        if lab_test:
-            save_kwargs['price_at_order_time'] = lab_test.price
-        serializer.save(**save_kwargs)
+        serializer.save(ordered_by=request.user.id, price_at_order_time=lab_test.price)
         self.log_action(request, 'create', 'test_order', serializer.instance.id)
         emit_lab_event(
             event_type=EVENT_LAB_TEST_REQUESTED,
             test_order=serializer.instance,
             clinic_id=request.user.clinic_id,
             triggered_by_id=request.user.id,
-            test_name=lab_test.name if lab_test else '',
+            test_name=lab_test.name,
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
