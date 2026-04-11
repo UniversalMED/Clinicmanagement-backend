@@ -9,11 +9,13 @@ from .views import (
     InvoicePayView,
     InvoiceCashPayView,
     InvoicePaymentListView,
+    InvoiceQuickPayCashView,
     ChapaWebhookView,
 )
 
 urlpatterns = [
     path('invoices/',                                         InvoiceListView.as_view()),
+    path('invoices/quick-pay-cash/',                          InvoiceQuickPayCashView.as_view()),
     path('invoices/<uuid:invoice_id>/',                       InvoiceDetailView.as_view()),
     path('invoices/<uuid:invoice_id>/items/',                 InvoiceLineItemsView.as_view()),
     path('invoices/<uuid:invoice_id>/items/<uuid:item_id>/',  InvoiceLineItemDetailView.as_view()),

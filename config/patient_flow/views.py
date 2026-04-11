@@ -309,6 +309,9 @@ class QueueListView(PaginatedListMixin, APIView):
         if doctor_id:
             qs = qs.filter(assigned_doctor_id=doctor_id)
 
+        # FCFS: order by queue_position (waiting), then by checked_in_at (first-come-first-served)
+        qs = qs.order_by('queue_position', 'checked_in_at', 'created_at')
+
         return self.paginate(qs, QueueEntrySerializer, request)
 
 

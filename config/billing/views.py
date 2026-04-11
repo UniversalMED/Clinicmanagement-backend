@@ -352,6 +352,100 @@ class InvoicePaymentListView(PaginatedListMixin, APIView):
         return self.paginate(qs, PaymentSerializer, request)
 
 
+class InvoiceQuickPayCashView(AuditLogMixin, APIView):
+    """
+    POST /api/billing/invoices/quick-pay-cash/
+
+    One-shot: create invoice from all awaiting_payment orders for a visit,
+    finalize it, and record a cash payment. Skips the multi-step invoice flow.
+
+    Body: { "visit_id": "<uuid>" }
+    """
+    permission_classes = [HasPermission.for_permission('manage_billing')]
+
+    def post(self, request):
+        visit_id = request.data.get('visit_id')
+        if not visit_id:
+            return Response({'visit_id': 'This field is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            visit_id_parsed = uuid.UUID(str(visit_id))
+        except (ValueError, AttributeError):
+            return Response({'visit_id': 'Must be a valid UUID.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        visit = get_object_or_404(
+            Visit.objects.for_clinic(request.user.clinic_id), id=visit_id_parsed
+        )
+
+        # Find all billable, unbilled awaiting_payment orders for this visit
+        orders = list(
+            TestOrder.objects.filter(
+                visit_id=visit.id,
+                is_billable=True,
+                billed_invoice_id__isnull=True,
+            ).exclude(status='canceled')
+        )
+
+        if not orders:
+            return Response(
+                {'detail': 'No billable orders found for this visit.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                # Create draft invoice
+                invoice = Invoice.objects.create(
+                    clinic_id=request.user.clinic_id,
+                    visit_id=visit.id,
+                    patient_id=visit.patient_id,
+                    issued_by=request.user.id,
+                    notes='',
+                )
+
+                # Add all pending orders as line items
+                for order in orders:
+                    lab_test = LabTest.objects.filter(
+                        clinic_id=request.user.clinic_id, id=order.test_id
+                    ).first()
+                    test_name = lab_test.name if lab_test else f'Test {str(order.test_id)[-6:]}'
+                    unit_price = order.price_at_order_time
+                    subtotal = unit_price * 1
+                    InvoiceLineItem.objects.create(
+                        invoice_id=invoice.id,
+                        test_order_id=order.id,
+                        test_name=test_name,
+                        unit_price=unit_price,
+                        quantity=1,
+                        subtotal=subtotal,
+                        notes='',
+                    )
+                recompute_invoice_totals(invoice)
+
+                # Finalize
+                finalize_invoice(
+                    invoice=invoice,
+                    finalized_by_id=request.user.id,
+                    discount_amount=0,
+                )
+
+                # Cash pay
+                payment = record_cash_payment(
+                    invoice=invoice,
+                    received_by_id=request.user.id,
+                )
+
+            self.log_action(request, 'create', 'invoice', invoice.id)
+            self.log_action(request, 'create', 'payment', payment.id)
+            return Response({
+                'invoice': InvoiceSerializer(invoice).data,
+                'payment': PaymentSerializer(payment).data,
+            }, status=status.HTTP_201_CREATED)
+
+        except BillingError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class ChapaWebhookView(APIView):
     """
     POST /api/billing/webhook/chapa/
