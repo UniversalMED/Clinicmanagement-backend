@@ -50,16 +50,16 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r backend/requirements.txt
 
       - name: Check for import / syntax errors
-        working-directory: config
+        working-directory: backend/config
         run: python manage.py check --deploy 2>&1 | grep -v "^System check" || true
 
       - name: Run Django system checks
-        working-directory: config
+        working-directory: backend/config
         run: python manage.py check
 
       - name: Run tests
-        working-directory: config
+        working-directory: backend/config
         run: python manage.py test --verbosity=2
